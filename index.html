@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Interactive Text Art (Complete)</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; color: white; }
+    canvas { display: block; }
+    #controls {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 8px;
+    }
+    label { display: block; margin: 8px 0 2px; font-size: 14px; }
+    input[type="range"], input[type="color"], input[type="text"] { width: 200px; margin-bottom: 5px; }
+    input[type="text"] { font-size: 18px; padding: 4px; }
+  </style>
+</head>
+<body>
+
+<div id="controls">
+  <label>Text:</label>
+  <input type="text" id="textInput" placeholder="Type something..." />
+
+  <label>Base Color:</label>
+  <input type="color" id="colorPicker" value="#00ffff" />
+
+  <label>Color Force Sensitivity:</label>
+  <input type="range" id="colorSensitivity" min="0" max="10" value="4" step="0.1" />
+
+  <label>Ball Size:</label>
+  <input type="range" id="ballSize" min="1" max="10" value="3" />
+
+  <label>Mouse Repel:</label>
+  <input type="range" id="mouseForce" min="0" max="1000" value="300" />
+
+  <label>Particle Repel:</label>
+  <input type="range" id="particleForce" min="0" max="50" value="10" />
+
+  <label>Return Force:</label>
+  <input type="range" id="returnForce" min="0" max="100" value="20" />
+
+  <label>Damping:</label>
+  <input type="range" id="damping" min="50" max="100" value="85" />
+</div>
+
+<canvas id="artCanvas"></canvas>
+
+<script>
+  const canvas = document.getElementById('artCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const textInput = document.getElementById('textInput');
+  const colorPicker = document.getElementById('colorPicker');
+  const colorSensitivitySlider = document.getElementById('colorSensitivity');
+  const ballSizeSlider = document.getElementById('ballSize');
+  const mouseForceSlider = document.getElementById('mouseForce');
+  const particleForceSlider = document.getElementById('particleForce');
+  const returnForceSlider = document.getElementById('returnForce');
+  const dampingSlider = document.getElementById('damping');
+
+  const mouse = { x: 0, y: 0 };
+  document.addEventListener('mousemove', e => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+  });
+
+  let points = [];
+
+  function hexToRgb(hex) {
+    const bigint = parseInt(hex.slice(1), 16);
+    return {
+      r: (bigint >> 16) & 255,
+      g: (bigint >> 8) & 255,
+      b: bigint & 255
+    };
+  }
+
+  function createTextPoints(text) {
+    const offscreen = document.createElement('canvas');
+    const offCtx = offscreen.getContext('2d');
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
+
+    offCtx.clearRect(0, 0, canvas.width, canvas.height);
+    offCtx.font = 'bold 150px sans-serif';
+    offCtx.fillStyle = 'white';
+    offCtx.textAlign = 'center';
+    offCtx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const imageData = offCtx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const newPoints = [];
+
+    for (let y = 0; y < canvas.height; y += 6) {
+      for (let x = 0; x < canvas.width; x += 6) {
+        const i = (y * canvas.width + x) * 4;
+        if (imageData[i + 3] > 128) {
+          newPoints.push({
+            x, y,
+            baseX: x,
+            baseY: y,
+            vx: 0,
+            vy: 0
+          });
+        }
+      }
+    }
+
+    points = newPoints;
+  }
+
+  function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const mouseForce = parseFloat(mouseForceSlider.value);
+    const particleForce = parseFloat(particleForceSlider.value);
+    const returnForce = parseFloat(returnForceSlider.value) / 100;
+    const damping = parseFloat(dampingSlider.value) / 100;
+    const colorSensitivity = parseFloat(colorSensitivitySlider.value);
+    const baseColor = hexToRgb(colorPicker.value);
+    const ballSize = parseFloat(ballSizeSlider.value);
+
+    for (let i = 0; i < points.length; i++) {
+      let p = points[i];
+
+      let ax = 0, ay = 0;
+
+      // Mouse repulsion
+      let dx = p.x - mouse.x;
+      let dy = p.y - mouse.y;
+      let dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 150 && dist > 0) {
+        let force = mouseForce / (dist * dist);
+        ax += (dx / dist) * force;
+        ay += (dy / dist) * force;
+      }
+
+      // Particle repulsion
+      for (let j = 0; j < points.length; j++) {
+        if (i === j) continue;
+        let other = points[j];
+        let dx2 = p.x - other.x;
+        let dy2 = p.y - other.y;
+        let d2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        if (d2 < 20 && d2 > 0) {
+          let repel = particleForce / (d2 * d2);
+          ax += (dx2 / d2) * repel;
+          ay += (dy2 / d2) * repel;
+        }
+      }
+
+      // Spring to base
+      let springDx = p.baseX - p.x;
+      let springDy = p.baseY - p.y;
+      ax += springDx * returnForce;
+      ay += springDy * returnForce;
+
+      // Update velocity
+      p.vx += ax;
+      p.vy += ay;
+
+      // Apply damping
+      p.vx *= damping;
+      p.vy *= damping;
+
+      // Update position
+      p.x += p.vx;
+      p.y += p.vy;
+
+      // Velocity magnitude for color effect
+      let speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+      let brightness = Math.min(1, speed * colorSensitivity);
+      let r = Math.min(255, baseColor.r + brightness * 100);
+      let g = Math.min(255, baseColor.g + brightness * 100);
+      let b = Math.min(255, baseColor.b + brightness * 100);
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, ballSize, 0, Math.PI * 2);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fill();
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  textInput.addEventListener('input', () => {
+    if (textInput.value.trim()) {
+      createTextPoints(textInput.value.trim());
+    } else {
+      points = [];
+    }
+  });
+
+  // Initial word
+  createTextPoints("Hello");
+  animate();
+</script>
+
+</body>
+</html>
